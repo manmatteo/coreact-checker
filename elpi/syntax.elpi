@@ -1,0 +1,31 @@
+% The format shared by all kernels: signatures, statements, proofs, scripts.
+kind tm, ty, fm, pf, arg, item, name type.
+
+% signature: the sort of each dependency
+pred sort o:string, o:list string.
+
+% types
+type s     string -> list tm -> ty.       % a sort applied to its dependencies
+type eq    tm -> tm -> ty.                % the built-in sort Equality
+type refl  tm.                            % its only witness
+
+% statements
+type all   ty -> (tm -> fm) -> fm.        % forall x:T, F
+type imp   fm -> fm -> fm.                % premise -> F
+type ex    ty -> (tm -> fm) -> fm.        % exists x:T, F
+type tt    fm.
+
+% proofs
+type lam   (tm -> pf) -> pf.              % bind an eigenvariable
+type use   name -> list arg -> pf -> pf.  % apply a rule, then continue
+type done  list tm -> pf.                 % reach the goal, with witnesses
+type t     tm -> arg.                     % argument for a forall
+type p     pf -> arg.                     % argument for a premise
+type lamp  (name -> pf) -> pf.            % bind a premise (only with -D SECOND)
+
+% scripts; def is an introduction rule whose eliminations are (inv N 0), (inv N 1), ...
+type axiom name -> fm -> item.
+type thm   name -> fm -> pf -> item.
+type def   name -> fm -> item.
+type inv   name -> int -> name.
+pred development o:list item.

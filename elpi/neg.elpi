@@ -1,0 +1,51 @@
+% Statements and proofs that every backend must accept or reject.
+accumulate cat.
+macro @v :- s "Vertex" [].
+macro @e A B :- s "Edge" [A,B].
+macro @t F G H :- s "Triangle" [F,G,H].
+macro @m F :- s "isMono" [F].
+type comp, addmono, n1 name.
+
+pred base o:list item.
+base [
+ axiom comp (all @v a\ all @v b\ all @v c\ all (@e a b) f\ all (@e b c) g\ ex (@e a c) h\ ex (@t f g h) _\ tt),
+ def addmono (all @v a\ all @v b\ all (@e a b) m\
+   imp (all @v x\ all (@e x a) f\ all (@e x a) g\ all (@e x b) u\
+        all (@t f m u) _\ all (@t g m u) _\ ex (eq f g) _\ tt) (ex (@m m) _\ tt))].
+
+pred accepted i:st, i:fm, i:pf.
+accepted E F P :- base B, std.append B [thm n1 F P] L, script E L.
+pred good i:st, i:string, i:fm, i:pf.
+good E S F P :- (accepted E F P, !, print "ok: accepted" S ; print "WRONG: rejected" S, fail).
+pred bad i:st, i:string, i:fm, i:pf.
+bad E S F P :- (accepted E F P, !, print "WRONG: accepted" S, fail ; print "ok: rejected" S).
+pred second i:st, i:string, i:fm, i:pf.         % accepted only with -D SECOND
+:if "SECOND" second E S F P :- good E S F P, !.
+:if "SECOND" second _ _ _ _ :- !, fail.
+second E S F P :- bad E S F P.
+
+main :- std.forall ["cut", "part"] (b\ sigma E\ backend b E, print "backend" b, tests E).
+
+pred tests i:st.
+tests E :-
+ good E "generated elimination rule" 
+   (all @v a\ all @v b\ all (@e a b) m\ all @v x\ all (@e x a) f\ all (@e x a) g\ all (@e x b) u\ all (@m m) _\ all (@t f m u) _\ all (@t g m u) _\ ex (eq f g) _\ tt)
+   (lam a\ lam b\ lam m\ lam x\ lam f\ lam g\ lam u\ lam q\ lam t1\ lam t2\ use (inv addmono 0) [t a,t b,t m,t q,t x,t f,t g,t u,t t1,t t2] (lam _\ done [refl])),
+ bad E "proof arguments left as holes" 
+   (all @v a\ all @v b\ all (@e a b) m\ all @v x\ all (@e x a) f\ all (@e x a) g\ all (@e x b) u\ all (@m m) _\ all (@t f m u) _\ all (@t g m u) _\ ex (eq f g) _\ tt)
+   (lam a\ lam b\ lam m\ lam x\ lam f\ lam g\ lam u\ lam q\ lam t1\ lam t2\ use (inv addmono 0) [t _,t _,t m,t _,t _,t f,t g,t _,t _,t _] (lam _\ done [refl])),
+ bad E "no isMono hypothesis"
+   (all @v a\ all @v b\ all (@e a b) m\ all @v x\ all (@e x a) f\ all (@e x a) g\ all (@e x b) u\ all (@t f m u) _\ all (@t g m u) _\ ex (eq f g) _\ tt)
+   (lam a\ lam b\ lam m\ lam x\ lam f\ lam g\ lam u\ lam t1\ lam t2\ use (inv addmono 0) [t a,t b,t m,t t1,t x,t f,t g,t u,t t1,t t2] (lam _\ done [refl])),
+ bad E "all parallel arrows equal" (all @v a\ all @v b\ all (@e a b) f\ all (@e a b) g\ ex (eq f g) _\ tt) (lam _\ lam _\ lam _\ lam _\ done [refl]),
+ bad E "wrong composability" (all @v a\ all @v b\ all (@e a b) f\ ex (@e a a) _\ tt) (lam a\ lam b\ lam f\ use comp [t a,t b,t a,t f,t f] (lam h\ lam _\ done [h])),
+ bad E "witness of wrong type" (all @v a\ all @v b\ all (@e a b) f\ ex (@e b a) _\ tt) (lam a\ lam b\ lam f\ done [f]),
+ bad E "hole as witness" (all @v a\ all @v b\ all (@e a b) f\ ex (@e b a) _\ tt) (lam a\ lam b\ lam f\ done [_]),
+ bad E "ill-formed: vertex = edge" (all @v a\ all (@e a a) f\ all (eq a f) _\ tt) (lam a\ lam f\ lam _\ done []),
+ bad E "ill-formed: equality across types" (all @v a\ all @v b\ all (@e a b) f\ all (@e b a) g\ all (eq f g) _\ tt) (lam a\ lam b\ lam f\ lam g\ lam _\ done []),
+ good E "transport along equalities" (all @v a\ all @v b\ all @v c\ all (@e a b) f\ all (eq a c) _\ all (eq c b) _\ ex (@e b a) _\ tt) (lam a\ lam b\ lam c\ lam f\ lam _\ lam _\ done [f]),
+ bad E "dropped premise" (all @v a\ all @v b\ all (@e a b) m\ ex (@m m) _\ tt) (lam a\ lam b\ lam m\ use addmono [t a,t b,t m] (lam r\ done [r])),
+ second E "second-order theorem"
+   (all @v a\ all @v b\ all (@e a b) m\ imp (all @v x\ all (@e x a) f\ all (@e x a) g\ all (@e x b) u\
+        all (@t f m u) _\ all (@t g m u) _\ ex (eq f g) _\ tt) (ex (@m m) _\ tt))
+   (lam a\ lam b\ lam m\ lamp n\ use addmono [t a,t b,t m,p (lam x\ lam f\ lam g\ lam u\ lam t1\ lam t2\ use n [t x,t f,t g,t u,t t1,t t2] (lam _\ done [refl]))] (lam r\ done [r])).

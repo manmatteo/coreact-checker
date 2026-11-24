@@ -1,0 +1,7 @@
+% The interface of an equality backend: a state and three predicates.
+accumulate syntax.
+kind st type.
+
+pred conv  i:st, i:tm, i:tm.                 % X = Y holds
+pred join  i:st, i:tm, i:tm, i:(st -> prop). % continue under X = Y
+pred fresh i:st, i:tm, i:(st -> prop).       % continue with a new variable

@@ -1,0 +1,78 @@
+% The rules, parametric in an equality backend (see equality.elpi).
+accumulate equality.
+
+pred has i:tm, o:ty.                         % contexts, only extended by pi and =>
+pred known i:name, o:fm.
+
+pred convs i:st, i:list tm, i:list tm.
+convs _ [] [].
+convs E [X|Xs] [Y|Ys] :- conv E X Y, convs E Xs Ys.
+
+pred inst i:st, i:tm, i:ty.                  % X : T, up to conversion
+inst E refl (eq A B) :- conv E A B.
+inst E X (s N Ys)    :- has X (s N Xs), convs E Xs Ys.
+
+pred assume i:st, i:tm, i:ty, i:(st -> prop). % continue under X : T
+assume E _ (eq A B) K :- join E A B K.
+assume E X (s N Xs) K :- has X (s N Xs) => fresh E X K.
+
+% The focused reading (LJF): all and imp are negative, ex and tt positive, and
+% sorts are positive atoms. A rule is a bipole, and use applies it in one go:
+%   use      decide on a rule, focusing on the left
+%   t, p     left focus: instantiate; prove a premise, which loses the focus
+%   []       end of the focus: the conclusion is opened on the left
+%   done     decide on the right; its witnesses are the right focus
+%   lam      eigenvariables of the asynchronous phases, on either side
+% inst is the initial rule (and =R, for refl); join is =L.
+
+% right rules
+pred chk i:st, i:pf, i:fm.
+chk E (lam P) (all T F)        :- pi x\ assume E x T (d\ chk d (P x) (F x)).
+chk E (done [X|Xs]) (ex T F)   :- inst E X T, chk E (done Xs) (F X).
+chk _ (done []) tt.
+chk E (use N S P) G            :- known N F, left E F S P G.
+:if "SECOND" chk E (lamp P) (imp N F) :- pi n\ known n N => chk E (P n) F.
+
+% left rules
+pred left i:st, i:fm, i:list arg, i:pf, i:fm.
+left E (all T F) [t X|S] P G   :- inst E X T, left E (F X) S P G.
+left E (imp N F) [p Q|S] P G   :- chk E Q N, left E F S P G.
+left E (ex T F) [] (lam P) G   :- pi x\ assume E x T (d\ left d (F x) [] (P x) G).
+left E tt [] P G               :- chk E P G.
+
+% well-formed statements
+pred args i:list tm, i:list string.
+args [] [].
+args [X|Xs] [D|Ds] :- has X (s D _), args Xs Ds.
+
+pred wfty i:st, i:ty.
+wfty E (eq A B) :- has B T, inst E A T.
+wfty _ (s N Xs) :- sort N Ds, args Xs Ds.
+
+pred wf i:st, i:fm.
+wf E (all T F) :- wfty E T, pi x\ assume E x T (d\ wf d (F x)).
+wf E (ex T F)  :- wfty E T, pi x\ assume E x T (d\ wf d (F x)).
+wf E (imp N F) :- wf E N, wf E F.
+wf _ tt.
+
+% scripts, from the initial state E
+pred script i:st, i:list item.
+script _ [].
+script E [axiom N F|L] :- wf E F, known N F => script E L.
+script E [thm N F P|L] :- wf E F, chk E P F, known N F => script E L.
+script E [def N F|L]   :- wf E F,
+  known N F => (pi I R\ known (inv N I) R :- elim F I R) => script E L.
+
+pred elim i:fm, i:int, o:fm.                 % the rule Γ, C, P_I |- Q_I
+elim (all T F) I (all T E) :- pi x\ elim (F x) I (E x).
+elim (imp N F) 0 E         :- concl F C, weaken C N E.
+elim (imp _ F) I E         :- I > 0, J is I - 1, elim F J E.
+
+pred concl i:fm, o:fm.
+concl (imp _ F) C :- concl F C.
+concl (ex T F) (ex T F).
+concl tt tt.
+
+pred weaken i:fm, i:fm, o:fm.
+weaken (ex T C) N (all T E) :- pi x\ weaken (C x) N (E x).
+weaken tt N N.

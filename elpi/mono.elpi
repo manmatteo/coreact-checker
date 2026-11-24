@@ -1,0 +1,38 @@
+% Example: monomorphisms compose.
+accumulate cat.
+macro @v :- s "Vertex" [].
+macro @e A B :- s "Edge" [A,B].
+macro @t F G H :- s "Triangle" [F,G,H].
+macro @m F :- s "isMono" [F].
+type comp, assoc, mono, monocomp name.
+
+development [
+ axiom comp (all @v a\ all @v b\ all @v c\ all (@e a b) f\ all (@e b c) g\
+   ex (@e a c) h\ ex (@t f g h) _\ tt),
+ axiom assoc (all @v a\ all @v b\ all @v c\ all @v d\
+   all (@e a b) f\ all (@e b c) g\ all (@e c d) h\
+   all (@e a c) fg\ all (@e b d) gh\ all (@e a d) k\ all (@e a d) k'\
+   all (@t f g fg) _\ all (@t g h gh) _\ all (@t fg h k) _\ all (@t f gh k') _\
+   ex (eq k k') _\ tt),
+ def mono (all @v a\ all @v b\ all (@e a b) m\
+   imp (all @v x\ all (@e x a) f\ all (@e x a) g\ all (@e x b) u\
+        all (@t f m u) _\ all (@t g m u) _\ ex (eq f g) _\ tt)
+   (ex (@m m) _\ tt)),
+ thm monocomp
+  (all @v a\ all @v b\ all @v c\ all (@e a b) m\ all (@e b c) n\ all (@e a c) h\
+   all (@t m n h) _\ all (@m m) _\ all (@m n) _\ ex (@m h) _\ tt)
+  (lam a\ lam b\ lam c\ lam m\ lam n\ lam h\ lam tr\ lam mm\ lam mn\
+   use mono [t a, t c, t h, p (
+      lam x\ lam f\ lam g\ lam u\ lam tf\ lam tg\
+      use comp [t x, t a, t b, t f, t m]   (lam mf\ lam t1\
+      use comp [t x, t a, t b, t g, t m]   (lam mg\ lam t2\
+      use comp [t x, t b, t c, t mf, t n]  (lam k\ lam t3\
+      use comp [t x, t b, t c, t mg, t n]  (lam l\ lam t4\
+      use assoc [t x, t a, t b, t c, t f, t m, t n, t mf, t h, t k, t u, t t1, t tr, t t3, t tf] (lam _\
+      use assoc [t x, t a, t b, t c, t g, t m, t n, t mg, t h, t l, t u, t t2, t tr, t t4, t tg] (lam _\
+      use (inv mono 0) [t b, t c, t n, t mn, t x, t mf, t mg, t u, t t3, t t4] (lam _\
+      use (inv mono 0) [t a, t b, t m, t mm, t x, t f, t g, t mf, t t1, t t2] (lam _\
+      done [refl]))))))))) ]
+   (lam r\ done [r]))
+].
+main :- check ["cut", "part"].

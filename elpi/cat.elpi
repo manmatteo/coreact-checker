@@ -1,0 +1,6 @@
+% Signature used by the hand-written examples.
+accumulate checker.
+sort "Vertex"   [].
+sort "Edge"     ["Vertex", "Vertex"].
+sort "Triangle" ["Edge", "Edge", "Edge"].
+sort "isMono"   ["Edge"].

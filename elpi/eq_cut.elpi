@@ -1,0 +1,17 @@
+% Equality backend: union-find in the context. Equations link representatives,
+% so every variable has at most one link; find needs a cut to stop at the end.
+accumulate equality.
+
+type links st.
+pred link i:tm, o:tm.
+
+pred find i:tm, o:tm.
+find X R :- link X Y, !, find Y R.
+find X X.
+
+conv links X Y :- find X R, find Y R.
+
+join links X Y K :- conv links X Y, !, K links.
+join links X Y K :- find X A, find Y B, link A B => K links.
+
+fresh links _ K :- K links.

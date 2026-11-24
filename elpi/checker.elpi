@@ -1,0 +1,14 @@
+% Runs a development through the chosen backends (by default, both).
+accumulate kernel.
+accumulate eq_cut.
+accumulate eq_part.
+
+pred backend o:string, o:st.
+backend "cut"  links.
+backend "part" (part []).
+
+pred check i:list string.                    % elpi -exec check FILE -- cut part
+check Bs :- development L, std.length L N, std.forall Bs (b\ check1 b L N).
+
+pred check1 i:string, i:list item, i:int.
+check1 B L N :- backend B E, script E L, print B ":" N "items checked".
