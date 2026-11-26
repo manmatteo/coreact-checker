@@ -1,19 +1,23 @@
-% Equality backend: an explicit partition of the variables. No cut, no negation.
+% Equality via explicit partitions, purely logical
 accumulate equality.
 
-type part list (list tm) -> st.
+type part list (list tm) -> eq_ctx.
 
 pred in i:list tm, i:tm.
 in [X|_] X.
 in [_|L] X :- in L X.
 
+pred append i:list tm, i:list tm, o:list tm.
+append [] L L.
+append [X|L] M [X|N] :- append L M N.
+
 pred pick i:list (list tm), i:tm, o:list tm, o:list (list tm). % X's class, the others
 pick [C|E] X C E     :- in C X.
 pick [C|E] X D [C|F] :- pick E X D F.
 
-conv (part E) X Y :- pick E X C _, in C Y.
+equal (part E) X Y :- pick E X C _, in C Y.
 
-join (part E) X Y K :- conv (part E) X Y, K (part E).
-join (part E) X Y K :- pick E X C D, pick D Y C' F, std.append C C' G, K (part [G|F]).
+assume_eq (part E) X Y K :- equal (part E) X Y, K (part E).
+assume_eq (part E) X Y K :- pick E X C D, pick D Y C' F, append C C' G, K (part [G|F]).
 
-fresh (part E) X K :- K (part [[X]|E]).
+add_var (part E) X K :- K (part [[X]|E]).

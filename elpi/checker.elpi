@@ -3,7 +3,7 @@ accumulate kernel.
 accumulate eq_cut.
 accumulate eq_part.
 
-pred backend o:string, o:st.
+pred backend o:string, o:eq_ctx.
 backend "cut"  links.
 backend "part" (part []).
 

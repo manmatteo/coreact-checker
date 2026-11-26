@@ -1,7 +1,8 @@
-% The interface of an equality backend: a state and three predicates.
+% The interface equality backends
 accumulate syntax.
-kind st type.
+kind eq_ctx type.
 
-pred conv  i:st, i:tm, i:tm.                 % X = Y holds
-pred join  i:st, i:tm, i:tm, i:(st -> prop). % continue under X = Y
-pred fresh i:st, i:tm, i:(st -> prop).       % continue with a new variable
+% equal and assume_eq should only be called on variables introduced by add_var
+pred equal     i:eq_ctx, i:tm, i:tm.                     % X = Y holds
+pred assume_eq i:eq_ctx, i:tm, i:tm, i:(eq_ctx -> prop). % continue under X = Y
+pred add_var   i:eq_ctx, i:tm, i:(eq_ctx -> prop).       % continue with a new variable

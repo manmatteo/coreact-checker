@@ -1,66 +1,89 @@
 % The rules, parametric in an equality backend (see equality.elpi).
 accumulate equality.
 
-pred has i:tm, o:ty.                         % contexts, only extended by pi and =>
+pred of i:tm, o:ty. % presheaf context
 pred known i:name, o:fm.
 
-pred convs i:st, i:list tm, i:list tm.
-convs _ [] [].
-convs E [X|Xs] [Y|Ys] :- conv E X Y, convs E Xs Ys.
+pred equals i:eq_ctx, i:list tm, i:list tm.
+equals _ [] [].
+equals E [X|Xs] [Y|Ys] :- equal E X Y, equals E Xs Ys.
 
-pred inst i:st, i:tm, i:ty.                  % X : T, up to conversion
-inst E refl (eq A B) :- conv E A B.
-inst E X (s N Ys)    :- has X (s N Xs), convs E Xs Ys.
+pred of_ty i:eq_ctx, i:tm, i:ty. % X : T, up to equality
+of_ty E refl (eq A B) :- equal E A B.
+of_ty E X (s N Ys)    :- of X (s N Xs), equals E Xs Ys.
 
-pred assume i:st, i:tm, i:ty, i:(st -> prop). % continue under X : T
-assume E _ (eq A B) K :- join E A B K.
-assume E X (s N Xs) K :- has X (s N Xs) => fresh E X K.
+pred assume i:eq_ctx, i:tm, i:ty, i:(eq_ctx -> prop). % continue under X : T
+assume E _ (eq A B) K :- assume_eq E A B K.
+assume E X (s N Xs) K :- of X (s N Xs) => add_var E X K.
 
 % The focused reading (LJF): all and imp are negative, ex and tt positive, and
-% sorts are positive atoms. A rule is a bipole, and use applies it in one go:
-%   use      decide on a rule, focusing on the left
-%   t, p     left focus: instantiate; prove a premise, which loses the focus
-%   []       end of the focus: the conclusion is opened on the left
-%   done     decide on the right; its witnesses are the right focus
-%   lam      eigenvariables of the asynchronous phases, on either side
-% inst is the initial rule (and =R, for refl); join is =L.
+% sorts are positive atoms. A rule is a bipole, and apply runs it in one go:
+%   apply       decide on a rule, focusing on the left (term match, then premise proofs)
+%   unpack      end of the focus: open the rule's existential conclusion on the left
+%   done        decide on the right; its witnesses are the right focus
+%   intro       eigenvariables of the right asynchronous phase (root layer)
+%   intro_rule  local rule hypotheses of the right asynchronous phase (-D SECOND)
+% of_ty is the initial rule (and =R, for refl); assume_eq is =L.
 
-% right rules
-pred chk i:st, i:pf, i:fm.
-chk E (lam P) (all T F)        :- pi x\ assume E x T (d\ chk d (P x) (F x)).
-chk E (done [X|Xs]) (ex T F)   :- inst E X T, chk E (done Xs) (F X).
-chk _ (done []) tt.
-chk E (use N S P) G            :- known N F, left E F S P G.
-:if "SECOND" chk E (lamp P) (imp N F) :- pi n\ known n N => chk E (P n) F.
+% 1. Right async (R↑): introduce the root layer (and premises, if second-order)
+pred prove i:eq_ctx, i:pf, i:fm.
+prove E (intro P) (all T F) :- pi x\ assume E x T (d\ prove d (P x) (F x)).
+:if "SECOND" prove E (intro_rule P) (imp N F) :- pi n\ known n N => prove E (P n) F.
+prove E P (ex T F)          :- solve E P (ex T F).
+prove E P tt                :- solve E P tt.
 
-% left rules
-pred left i:st, i:fm, i:list arg, i:pf, i:fm.
-left E (all T F) [t X|S] P G   :- inst E X T, left E (F X) S P G.
-left E (imp N F) [p Q|S] P G   :- chk E Q N, left E F S P G.
-left E (ex T F) [] (lam P) G   :- pi x\ assume E x T (d\ left d (F x) [] (P x) G).
-left E tt [] P G               :- chk E P G.
+% 2. Neutral (Decide): apply a rule bipole on the left, or close the goal on the right
+pred solve i:eq_ctx, i:pf, i:fm.
+solve E (apply N Xs Ps P) G :- known N F, apply_rule E F Xs Ps P G.
+solve E (done Ws) G         :- witness E Ws G.
+
+% 3. Left focus (L↓) + Left async (L↑): match root, prove premises, unpack conclusion
+pred apply_rule i:eq_ctx, i:fm, i:list tm, i:list pf, i:pf, i:fm.
+apply_rule E (all T F) [X|Xs] Ps     P          G :- of_ty E X T, apply_rule E (F X) Xs Ps P G.
+apply_rule E (imp N F) []     [Q|Qs] P          G :- prove E Q N, apply_rule E F [] Qs P G.
+apply_rule E (ex T F)  []     []     (unpack P) G :- pi x\ assume E x T (d\ apply_rule d (F x) [] [] (P x) G).
+apply_rule E tt        []     []     P          G :- solve E P G.
+
+% 4. Right focus (R↓): supply witnesses for the positive goal
+pred witness i:eq_ctx, i:list tm, i:fm.
+witness E [X|Xs] (ex T F) :- of_ty E X T, witness E Xs (F X).
+witness _ []     tt.
 
 % well-formed statements
-pred args i:list tm, i:list string.
-args [] [].
-args [X|Xs] [D|Ds] :- has X (s D _), args Xs Ds.
+pred wfdeps i:list tm, i:list string.
+wfdeps [] [].
+wfdeps [X|Xs] [D|Ds] :- of X (s D _), wfdeps Xs Ds.
 
-pred wfty i:st, i:ty.
-wfty E (eq A B) :- has B T, inst E A T.
-wfty _ (s N Xs) :- sort N Ds, args Xs Ds.
+pred wf_ty i:eq_ctx, i:ty.
+wf_ty E (eq A B) :- of B T, of_ty E A T.
+wf_ty _ (s N Xs) :- sort N Ds, wfdeps Xs Ds.
 
-pred wf i:st, i:fm.
-wf E (all T F) :- wfty E T, pi x\ assume E x T (d\ wf d (F x)).
-wf E (ex T F)  :- wfty E T, pi x\ assume E x T (d\ wf d (F x)).
-wf E (imp N F) :- wf E N, wf E F.
-wf _ tt.
+pred wf_concl i:eq_ctx, i:fm. % A positive conclusion layer
+wf_concl E (ex T F)  :- wf_ty E T, pi x\ assume E x T (d\ wf_concl d (F x)).
+wf_concl _ tt.
+
+pred wf_fo i:eq_ctx, i:fm. % First order rule / premise / theorem
+wf_fo E (all T F) :- wf_ty E T, pi x\ assume E x T (d\ wf_fo d (F x)).
+wf_fo E F :- wf_concl E F.
+
+pred wf_so i:eq_ctx, i:fm. % Second order rule
+wf_so E (all T F) :- wf_ty E T, pi x\ assume E x T (d\ wf_so d (F x)).
+wf_so E F :- wf_prems E F.
+
+pred wf_prems i:eq_ctx, i:fm. % disallow implication nesting to the left
+wf_prems E (imp N F) :- wf_fo E N, wf_prems E F.
+wf_prems E F :-  wf_concl E F.
+
+pred wf_thm i:eq_ctx, i:fm.
+:if "SECOND" wf_thm E F :- wf_so E F.
+wf_thm E F :- wf_fo E F.
 
 % scripts, from the initial state E
-pred script i:st, i:list item.
+pred script i:eq_ctx, i:list item.
 script _ [].
-script E [axiom N F|L] :- wf E F, known N F => script E L.
-script E [thm N F P|L] :- wf E F, chk E P F, known N F => script E L.
-script E [def N F|L]   :- wf E F,
+script E [axiom N F|L] :- wf_so E F, known N F => script E L.
+script E [thm N F P|L] :- wf_thm E F, prove E P F, known N F => script E L.
+script E [def N F|L]   :- wf_so E F,
   known N F => (pi I R\ known (inv N I) R :- elim F I R) => script E L.
 
 pred elim i:fm, i:int, o:fm.                 % the rule Γ, C, P_I |- Q_I

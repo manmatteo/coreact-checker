@@ -1,5 +1,5 @@
 % The format shared by all kernels: signatures, statements, proofs, scripts.
-kind tm, ty, fm, pf, arg, item, name type.
+kind tm, ty, fm, pf, item, name type.
 
 % signature: the sort of each dependency
 pred sort o:string, o:list string.
@@ -16,12 +16,11 @@ type ex    ty -> (tm -> fm) -> fm.        % exists x:T, F
 type tt    fm.
 
 % proofs
-type lam   (tm -> pf) -> pf.              % bind an eigenvariable
-type use   name -> list arg -> pf -> pf.  % apply a rule, then continue
-type done  list tm -> pf.                 % reach the goal, with witnesses
-type t     tm -> arg.                     % argument for a forall
-type p     pf -> arg.                     % argument for a premise
-type lamp  (name -> pf) -> pf.            % bind a premise (only with -D SECOND)
+type intro      (tm -> pf) -> pf.              % bind an eigenvariable
+type unpack     (tm -> pf) -> pf.              % bind an existential assumption
+type apply      name -> list tm -> list pf -> pf -> pf.  % apply a rule, then continue
+type done       list tm -> pf.                 % reach the goal, with witnesses
+type intro_rule (name -> pf) -> pf.            % bind a premise (only with -D SECOND)
 
 % scripts; def is an introduction rule whose eliminations are (inv N 0), (inv N 1), ...
 type axiom name -> fm -> item.
