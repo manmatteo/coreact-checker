@@ -21,18 +21,18 @@ development [
  thm monocomp
   (all @v a\ all @v b\ all @v c\ all (@e a b) m\ all (@e b c) n\ all (@e a c) h\
    all (@t m n h) _\ all (@m m) _\ all (@m n) _\ ex (@m h) _\ tt)
-  (lam a\ lam b\ lam c\ lam m\ lam n\ lam h\ lam tr\ lam mm\ lam mn\
-   use mono [t a, t c, t h, p (
-      lam x\ lam f\ lam g\ lam u\ lam tf\ lam tg\
-      use comp [t x, t a, t b, t f, t m]   (lam mf\ lam t1\
-      use comp [t x, t a, t b, t g, t m]   (lam mg\ lam t2\
-      use comp [t x, t b, t c, t mf, t n]  (lam k\ lam t3\
-      use comp [t x, t b, t c, t mg, t n]  (lam l\ lam t4\
-      use assoc [t x, t a, t b, t c, t f, t m, t n, t mf, t h, t k, t u, t t1, t tr, t t3, t tf] (lam _\
-      use assoc [t x, t a, t b, t c, t g, t m, t n, t mg, t h, t l, t u, t t2, t tr, t t4, t tg] (lam _\
-      use (inv mono 0) [t b, t c, t n, t mn, t x, t mf, t mg, t u, t t3, t t4] (lam _\
-      use (inv mono 0) [t a, t b, t m, t mm, t x, t f, t g, t mf, t t1, t t2] (lam _\
-      done [refl]))))))))) ]
-   (lam r\ done [r]))
+  (intro a\ intro b\ intro c\ intro m\ intro n\ intro h\ intro tr\ intro mm\ intro mn\
+   apply mono [a, c, h] [
+      intro x\ intro f\ intro g\ intro u\ intro tf\ intro tg\
+      apply comp [x, a, b, f, m]   [] (unpack mf\ unpack t1\
+      apply comp [x, a, b, g, m]   [] (unpack mg\ unpack t2\
+      apply comp [x, b, c, mf, n]  [] (unpack k\ unpack t3\
+      apply comp [x, b, c, mg, n]  [] (unpack l\ unpack t4\
+      apply assoc [x, a, b, c, f, m, n, mf, h, k, u, t1, tr, t3, tf] [] (unpack _\
+      apply assoc [x, a, b, c, g, m, n, mg, h, l, u, t2, tr, t4, tg] [] (unpack _\
+      apply (inv mono 0) [b, c, n, mn, x, mf, mg, u, t3, t4] [] (unpack _\
+      apply (inv mono 0) [a, b, m, mm, x, f, g, mf, t1, t2] [] (unpack _\
+      done [refl])))))))) ]
+   (unpack r\ done [r]))
 ].
 main :- check ["cut", "part"].
