@@ -7,20 +7,31 @@
     let
       systems = [ "aarch64-darwin" "aarch64-linux" "x86_64-linux" ];
       forAll = f: nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
-      # Use nixpkgs' elpi-lsp once it exists there, else build it from ./nix
-      mkElpiLsp = pkgs:
-        pkgs.ocamlPackages.elpi-lsp or (pkgs.ocamlPackages.callPackage ./nix/elpi-lsp.nix { });
+      # Elpi >= 4.1 and the packages built from its sources: nixpkgs' ones
+      # once it has them, else the ones of ./nix
+      ocamlPackagesOf = pkgs: pkgs.ocamlPackages.overrideScope (self: super: {
+        elpi =
+          if nixpkgs.lib.versionAtLeast super.elpi.version "4.1" then super.elpi
+          else self.callPackage ./nix/elpi.nix { inherit (super) elpi; };
+        elpi-lsp = super.elpi-lsp or (self.callPackage ./nix/elpi-lsp.nix { });
+        ppx_elpi = super.ppx_elpi or (self.callPackage ./nix/ppx_elpi.nix { });
+        elpi-json = super.elpi-json or (self.callPackage ./nix/elpi-json.nix { });
+      });
     in {
-      packages = forAll (pkgs: rec {
-        elpi = pkgs.ocamlPackages.elpi;
-        elpi-lsp = mkElpiLsp pkgs;
-        default = elpi-lsp;
-      });
+      packages = forAll (pkgs:
+        let ocamlPackages = ocamlPackagesOf pkgs; in rec {
+          inherit (ocamlPackages) elpi elpi-lsp elpi-json;
+          default = elpi-lsp;
+        });
 
-      devShells = forAll (pkgs: {
-        default = pkgs.mkShellNoCC {
-          packages = [ pkgs.ocamlPackages.elpi (mkElpiLsp pkgs) pkgs.git ];
-        };
-      });
+      devShells = forAll (pkgs:
+        let ocamlPackages = ocamlPackagesOf pkgs; in {
+          default = pkgs.mkShellNoCC {
+            packages = with ocamlPackages; [ elpi elpi-lsp findlib pkgs.git ];
+            # the hook of findlib puts these on OCAMLPATH, where elpi finds the
+            # plugin of accumulate "+elpi-json" (and elpi-lsp its stub)
+            buildInputs = [ ocamlPackages.elpi-json ];
+          };
+        });
     };
 }
