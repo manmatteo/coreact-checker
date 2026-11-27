@@ -1,0 +1,3 @@
+*.elpi gitlab-language=prolog linguist-language=prolog
+*.mod gitlab-language=prolog linguist-language=prolog
+*.sig gitlab-language=prolog linguist-language=prolog

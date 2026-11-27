@@ -1,0 +1,63 @@
+# Tests the checker, and publishes its page (nix build .#site) on GitHub
+# Pages from main. Pages takes its source from GitHub Actions (Settings →
+# Pages → Build and deployment → Source).
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v32
+
+      # the tests of tests/, with Elpi itself (checks of flake.nix)
+      - name: Test
+        run: nix flake check -L
+
+      - name: Build the site
+        run: nix build .#site -L
+
+      # the page, served under a path as on Pages: the example checks in
+      # Chrome, with both builds of Elpi on the web
+      - name: Check the page in a browser
+        run: |
+          mkdir serve && ln -s "$(readlink -f result)" serve/site
+          python3 -m http.server -d serve 8000 2> /dev/null &
+          sleep 1
+          for b in wasm js; do
+            google-chrome --headless --no-sandbox --virtual-time-budget=60000 \
+              --dump-dom "http://localhost:8000/site/?sample&backend=$b" > page.html
+            grep -A2 'id="status"' page.html
+            grep -q 'id="result"[^>]*class="ok"' page.html
+          done
+
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: result/
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,52 @@
+diff -ru a/webrunner/dune b/webrunner/dune
+--- a/webrunner/dune
++++ b/webrunner/dune
+@@ -18,7 +18,7 @@
+  (name web_api)
+  (modes js wasm)
+  (modules web_api)
+- (libraries elpi js_of_ocaml))
++ (libraries elpi elpi-json js_of_ocaml))
+ 
+ ; the entry point of the server, the script of the worker
+ (rule
+diff -ru a/webrunner/web_api.ml b/webrunner/web_api.ml
+--- a/webrunner/web_api.ml
++++ b/webrunner/web_api.ml
+@@ -18,7 +18,9 @@
+ 
+    Accumulated files are read with the file system of Node, or with the
+    pseudo file system of js_of_ocaml in a browser. The builtins are the
+-   standard ones (Elpi.Builtin.std_builtins). *)
++   standard ones (Elpi.Builtin.std_builtins), and the plugin elpi-json is
++   linked in: accumulate "+elpi-json" finds it. The file path of a package,
++   accumulate "+pkg/path", is /packages/pkg/path (e.g. for the fileReader). *)
+ 
+ open Js_of_ocaml
+ open Elpi
+@@ -158,6 +160,16 @@
+ 
+ (* Setup *)
+ 
++(* elpi-json registers its plugin (Plugin.register) when it is linked *)
++let () = ignore Elpi_json.builtins
++
++let packages = {
++  Setup.dir = (fun ~pkg -> "/packages/" ^ pkg);
++  load = None;
++  root_of_dir = (fun ~dir:_ ->
++    Error.error ~component:"Packages" "accumulate \"+/...\": no project on the web");
++}
++
+ let setup = obj [
+   (* init({ flags, fileResolver, fileReader }) *)
+   "init", fn1 (fun options ->
+@@ -165,7 +177,7 @@
+       ?flags:(Option.map Compile.to_setup_flags (flags_opt options))
+       ?file_resolver:(Option.map resolver_of (field options "fileResolver"))
+       ?file_reader:(Option.map reader_of (field options "fileReader"))
+-      ~builtins:[Builtin.std_builtins] ()));
++      ~builtins:[Builtin.std_builtins] ~packages ()));
+   (* setStdFormatter(f), setErrFormatter(f): f(string) gets what Elpi prints *)
+   "setStdFormatter", fn1 (fun f -> Setup.set_std_formatter (formatter_of f); null);
+   "setErrFormatter", fn1 (fun f -> Setup.set_err_formatter (formatter_of f); null);

@@ -1,5 +1,5 @@
 % Signature used by the hand-written examples.
-accumulate checker.
+accumulate "../elpi/checker".
 sort "Vertex"   [].
 sort "Edge"     ["Vertex", "Vertex"].
 sort "Triangle" ["Edge", "Edge", "Edge"].

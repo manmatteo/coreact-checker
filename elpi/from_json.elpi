@@ -1,0 +1,450 @@
+% Reads a development from an archive of coreact-workbench (the HRX file that
+% its Save button writes) with the plugin elpi-json, and checks it as
+% checker.elpi does:
+%   elpi -exec check_json elpi/from_json.elpi -- tests/joy_of_cats.hrx cut part
+% The archive gives the signature (its section sorts.json) and the drawings
+% (drawings.json). The statement of a rule is read from the layers and
+% artefacts of its drawing, as the Rocq export of the workbench reads it
+% (rocq_export.ts); its proof, if it has one, from the Rocq script recorded
+% with it (rocqProof). The rules without a proof are axioms.
+accumulate "+elpi-json/utils".
+accumulate checker.
+
+type named string -> name.                   % a rule, by its name in Rocq
+typeabbrev env (list (pair string tm)).      % the artefacts or names in scope
+
+% [check_json [File|Backends]] checks the rules of File with each backend
+% (by default, both). If they do not check, it names the first rule that does
+% not, running script again on each prefix of the development
+pred check_json i:list string.
+check_json [File|Bs] :- open_in File C, read_all C T, close_in C, check_text File T Bs.
+
+pred read_all i:in_stream, o:string.
+read_all C S :- input C 1048576 S0, (eof C, S = S0 ; not (eof C), read_all C S1, S is S0 ^ S1).
+
+% [check_text Name Text Backends] the same, for the archive Name given as a
+% text, as in a browser. (Not with open_string: it writes the text to a
+% temporary file, and Elpi in WebAssembly has no files in a browser)
+pred check_text i:string, i:string, i:list string.
+check_text Name T [] :- check_text Name T ["cut", "part"].
+check_text Name T [B|Bs] :-
+  read_archive Name T Sig L, (signature Sig => std.forall [B|Bs] (check_with L)).
+
+pred check_with i:list (pair string item), i:string.
+check_with L B :-
+  must (backend B _) {msg B "not a backend (cut, part)"},
+  std.map L snd Is, ((development Is => check [B]) ; first_bad B [] L).
+
+pred first_bad i:string, i:list item, i:list (pair string item).
+first_bad B _ [] :- std.fatal-error {msg B "the development does not check"}.
+first_bad B Ok [pr N I|L] :- backend B E, std.append Ok [I] Ok1,
+  (std.once (script E Ok1), first_bad B Ok1 L ; std.fatal-error {calc (B ^ ": " ^ N ^ " does not check")}).
+
+% [read_archive File T Sig L] Sig is the signature of the archive File, of
+% text T, and L its rules with the names of their drawings
+pred read_archive i:string, i:string, o:list sortdecl, o:list (pair string item).
+read_archive File T Sig L :-
+  read_hrx File T Ss, section File Ss "sorts.json" S, section File Ss "drawings.json" D,
+  must (ordered_json S (json.list JSs)) {msg File "sorts.json is not a list"},
+  decode_sorts File [] JSs Sig,
+  must (json.from_string D JD ok, json.lookup JD "drawings" (json.list JDs))
+    {msg File "drawings.json has no list of drawings"},
+  (signature Sig => (std.map JDs decode Dws, std.filter Dws is_rule Rs, std.map Rs item L)).
+
+pred must i:prop, i:string.                  % P, else stop with the message M
+must P M :- std.once (P ; std.fatal-error M).
+
+pred msg i:string, i:string, o:string.
+msg N S M :- M is N ^ ": " ^ S.
+
+% -- the archive, as hrx/codec.ts reads it: a line "B path" begins a
+% section, a line "B" a comment, as the lines before the first section do,
+% where the boundary B is the <=...=> of the first line "<=...=> path". The
+% text is cut at these lines, not into lines: on the web, the stack of Elpi
+% is too small for a list of some thousand elements
+pred read_hrx i:string, i:string, o:list string.             % "path\nbody"
+read_hrx File T0 Ss :-
+  rex.replace "\r$" "" {calc ("\n" ^ T0)} T, rex.split "^<=+> " T [Before|_],
+  N is size Before, R is substring T N (size T - N),          % from the first section
+  must (rex.match "<=+> " R) {msg File "not an HRX archive: it has no section"},
+  rex.replace "^\\(<=+>\\) \\(.\\|\n\\)*" "\\1" R B,
+  rex.split {calc ("^" ^ B ^ "\\( \\|$\\)")} R Ss.
+
+pred section i:string, i:list string, i:string, o:string.    % the body of the section P
+section File Ss P B :-
+  H is P ^ "\n", N is size H,
+  must (std.filter Ss (s\ size s >= N, H is substring s 0 N) [S])
+    {msg File {calc ("the archive has no section " ^ P ^ ", or several")}},
+  B is substring S N (size S - N).
+
+% -- JSON whose objects keep the order of their keys, which elpi-json sorts.
+% The tokens are the strings, the punctuation, and what lies between them;
+% elpi-json reads the strings and the other values
+pred ordered_json i:string, o:json.
+ordered_json S J :-
+  rex.replace "\\(\"\\([^\"\\\\]\\|\\\\.\\)*\"\\|[][{}:,]\\)" "\n\\1\n" S S1, rex.split "\n" S1 Ps,
+  std.map-filter Ps (p\ t\ rex.replace "^[ \t]+\\|[ \t]+$" "" p t, not (t = "")) Ts,
+  oj.value J Ts [].
+
+pred oj.value o:json, i:list string, o:list string.
+oj.value (json.assoc KVs) ["{"|S] S' :- oj.seq oj.member KVs S ["}"|S'].
+oj.value (json.list Vs) ["["|S] S' :- oj.seq oj.value Vs S ["]"|S'].
+oj.value J [T|S] S :- not (std.mem! ["{", "}", "[", "]", ":", ","] T), json.from_string T J ok.
+
+pred oj.member o:pair string json, i:list string, o:list string.
+oj.member (pr K V) [T, ":"|S] S' :- json.from_string T (json.string K) ok, oj.value V S S'.
+
+% [oj.seq P Xs S S'] the Xs, as P reads them, separated by commas
+pred oj.seq i:(pred o:A, i:list string, o:list string), o:list A, i:list string, o:list string.
+oj.seq _ [] S S.
+oj.seq P [X|Xs] S S' :- P X S S1, oj.seq1 P Xs S1 S'.
+pred oj.seq1 i:(pred o:A, i:list string, o:list string), o:list A, i:list string, o:list string.
+oj.seq1 _ [] S S.
+oj.seq1 P [X|Xs] [","|S] S' :- P X S S1, oj.seq1 P Xs S1 S'.
+
+% -- signature
+% The sorts of sorts.json, in its order, which is the order of their
+% declaration (that is the order of the binders of a layer), each with its
+% dependencies (key, sort) in their order there, which is the order of the
+% object given to newSort: the workbench writes a sort after the ones it
+% depends on, and the keys of an object in the order of JavaScript
+kind sortdecl type.
+type sortdecl string -> list (pair string string) -> sortdecl.
+pred signature o:list sortdecl.
+
+pred decode_sorts i:string, i:list string, i:list json, o:list sortdecl.   % after the sorts Done
+decode_sorts _ _ [] [].
+decode_sorts F Done [J|Js] [sortdecl N KDs|Sig] :-
+  must (json.lookup J "name" (json.string N), json.lookup J "deps" (json.assoc KJs), std.map KJs dep KDs)
+    {msg F "sorts.json: a sort without a name or deps"},
+  must (std.forall KDs (kd\ sigma S\ snd kd S, std.mem! Done S))
+    {msg F {calc ("sorts.json: " ^ N ^ " depends on a sort not declared before it")}},
+  decode_sorts F [N|Done] Js Sig.
+
+pred dep i:pair string json, o:pair string string.
+dep (pr K (json.string S)) (pr K S).
+
+sort N Ds :- signature L, std.mem L (sortdecl N KDs), std.map KDs snd Ds.
+
+pred sort_keys i:string, o:list string.
+sort_keys N Ks :- signature L, std.mem L (sortdecl N KDs), std.map KDs fst Ks.
+
+pred rank i:string, o:int.                   % the position of a sort
+rank N I :- signature L, rank_aux L N 0 I.
+pred rank_aux i:list sortdecl, i:string, i:int, o:int.
+rank_aux [sortdecl N _|_] N I I.
+rank_aux [sortdecl M _|L] N I J :- not (M = N), I1 is I + 1, rank_aux L N I1 J.
+
+% -- drawings, as the JSON file has them
+kind layer, art, drawing type.
+type layer string -> option string -> layer.                              % id, parent
+type art string -> string -> string -> list (pair string string) -> art. % id, sort, layer, dependencies (key, id)
+type drawing string -> bool -> list layer -> list art -> string -> drawing. % name, isRule, layers, artefacts, rocqProof ("" if none)
+
+pred is_rule i:drawing.                      % the other drawings are not exported
+is_rule (drawing _ tt _ _ _).
+
+pred decode i:json, o:drawing.
+decode J (drawing N R Ls As P) :-
+  must (json.lookup J "name" (json.string N)) "a drawing has no name",
+  must (json.lookup J "isRule" (json.bool R),
+     json.lookup J "layers" (json.list JLs), std.map JLs decode_layer Ls,
+     json.lookup J "artefacts" (json.list JAs), std.map JAs decode_art As)
+    {msg N "not a drawing of the workbench"},
+  decode_proof J P.
+
+pred decode_layer i:json, o:layer.
+decode_layer J (layer I P) :-
+  json.lookup J "id" (json.string I), json.lookup J "parentId" JP, decode_parent JP P.
+
+pred decode_parent i:json, o:option string.
+decode_parent json.null none.
+decode_parent (json.string P) (some P).
+
+pred decode_art i:json, o:art.
+decode_art J (art I S L Ds) :-
+  json.lookup J "id" (json.string I), json.lookup J "sortName" (json.string S),
+  json.lookup J "layerId" (json.string L),
+  json.lookup J "dependencies" (json.assoc KVs), std.map KVs decode_dep Ds.
+
+pred decode_dep i:pair string json, o:pair string string.
+decode_dep (pr K (json.string V)) (pr K V).
+
+pred decode_proof i:json, o:string.
+decode_proof J P  :- json.lookup J "rocqProof" (json.string P).
+decode_proof J "" :- not (json.lookup J "rocqProof" _).
+
+% -- items: a rule with a proof is a theorem, one without is an axiom
+pred item i:drawing, o:pair string item.
+item (drawing N _ Ls As P) (pr N I) :-
+  std.forall As (known_sort N),
+  must (rule_fm Ls As F) {msg N "not a rule: see its layers and the dependencies of its artefacts"},
+  tokens P Ts, item_aux N F Ts I.
+
+pred known_sort i:string, i:art.
+known_sort N (art _ S _ _) :-
+  must (S = "Equality" ; sort_keys S _) {msg N {calc ("the sort " ^ S ^ " is not in the signature")}}.
+
+pred item_aux i:string, i:fm, i:list string, o:item.
+item_aux N F [] (axiom (named R) F) :- ident N I, R is I ^ "_rule".
+item_aux N F Ts (thm (named R) F P) :- Ts = [_|_],
+  must (not (std.rev Ts [".", "Admitted"|_])) {msg N "its proof is admitted"},
+  must (parse.script R S T Ts []) {msg N "cannot read its rocqProof"},
+  must (elab [] S F) {msg N "the statement of its rocqProof is not the one of its drawing"},
+  must (proof S T P) {msg N "its rocqProof uses a name that is not in scope"}.
+
+% [ident S I] I is the identifier of Rocq for S, as in sanitizeIdent: a
+% character (an UTF-16 unit of it) is _ unless in A-Za-z0-9_', and x comes
+% before a leading digit or _. (Not done: an x before a keyword, which a
+% name ending in _rule never is)
+pred ident i:string, o:string.
+ident S I :-
+  C is "[" ^ chr 128 ^ "-" ^ chr 191 ^ "]*",
+  rex.replace {calc ("[" ^ chr 240 ^ "-" ^ chr 247 ^ "]" ^ C)} "__" S S1,
+  rex.replace {calc ("[" ^ chr 192 ^ "-" ^ chr 239 ^ "]" ^ C)} "_" S1 S2,
+  rex.replace "[^A-Za-z0-9_']" "_" S2 S3,
+  ident_x S3 I.
+pred ident_x i:string, o:string.
+ident_x S I :- rex.match "^[0-9_]" S, I is "x" ^ S.
+ident_x S S :- not (rex.match "^[0-9_]" S).
+
+% -- statements of drawings
+% A rule binds the artefacts of its root layer, then its premises (a layer
+% that has a child, the goal of the premise) imply its conclusion (the first
+% layer without children). The artefacts of a layer are bound in the order of
+% the signature, each equality after the latest sort that it equates, and
+% else in the order of the drawing; an equality of n artefacts is n-1
+% equations. A dependency names an artefact bound before, in the same layer
+% or in an ancestor
+kind quant, elem type.
+type q.all, q.ex quant.
+type elem.art string -> string -> list string -> elem.  % id, sort, dependencies
+type elem.eq string -> string -> elem.                  % an equation between two ids
+
+pred rule_fm i:list layer, i:list art, o:fm.
+rule_fm Ls As F :-
+  std.filter Ls is_root [layer R _], children Ls R Cs, split Ls Cs C Ps,
+  layer_els As R Els, binds [] Els q.all (premises Ls As Ps C) F.
+
+pred is_root i:layer.
+is_root (layer _ none).
+
+pred children i:list layer, i:string, o:list string.
+children Ls P Cs :- std.map-filter Ls (child P) Cs.
+pred child i:string, i:layer, o:string.
+child P (layer C (some P)) C.
+
+pred split i:list layer, i:list string, o:string, o:list string. % conclusion, premises
+split Ls [C|Ps] C Ps     :- children Ls C [].
+split Ls [P|Cs] C [P|Ps] :- children Ls P [_|_], split Ls Cs C Ps.
+
+pred premises i:list layer, i:list art, i:list string, i:string, i:env, o:fm.
+premises _ As [] C E F :- layer_els As C Els, binds E Els q.ex nothing F.
+premises Ls As [P|Ps] C E (imp N F) :-
+  children Ls P [G|_], layer_els As P PEls, layer_els As G GEls,
+  binds E PEls q.all (e\ binds e GEls q.ex nothing) N,
+  premises Ls As Ps C E F.
+
+pred nothing i:env, o:fm.
+nothing _ tt.
+
+% [binds E Els Q K F] F binds with Q the elements Els in scope E, then is
+% what K gives in the scope extended with them
+pred binds i:env, i:list elem, i:quant, i:(pred i:env, o:fm), o:fm.
+binds E [] _ K F :- K E F.
+binds E [X|Xs] Q K F :-
+  el_ty E X T, quant Q T G F, pi x\ sigma E1\ el_bind X x E E1, binds E1 Xs Q K (G x).
+
+pred quant i:quant, i:ty, o:(tm -> fm), o:fm.
+quant q.all T F (all T F).
+quant q.ex T F (ex T F).
+
+pred el_ty i:env, i:elem, o:ty.
+el_ty E (elem.art _ N Ds) (s N Xs) :- std.map Ds (d\ x\ std.lookup! E d x) Xs.
+el_ty E (elem.eq A B) (eq X Y) :- std.lookup! E A X, std.lookup! E B Y.
+
+pred el_bind i:elem, i:tm, i:env, o:env.
+el_bind (elem.art I _ _) X E [pr I X|E].
+el_bind (elem.eq _ _) _ E E.
+
+pred layer_els i:list art, i:string, o:list elem.
+layer_els As L Els :-
+  std.filter As (in_layer L) Here, std.map Here (art_els As) Ess, std.flatten Ess KEls,
+  signature Sig, std.length Sig N, M is 2 * N, std.iota M Ks,
+  std.map Ks (k\ g\ std.map-filter KEls (keyed k) g) Gs, std.flatten Gs Els.
+
+pred in_layer i:string, i:art.
+in_layer L (art _ _ L _).
+
+pred keyed i:int, i:pair int elem, o:elem.
+keyed K (pr K X) X.
+
+pred art_els i:list art, i:art, o:list (pair int elem). % with the key of their group
+art_els _ (art I N _ KDs) [pr K (elem.art I N Ds)] :- not (N = "Equality"),
+  sort_keys N Ks, std.map Ks (k\ d\ std.lookup! KDs k d) Ds, rank N R, K is 2 * R.
+art_els As (art _ "Equality" _ KDs) Eqs :-          % its dependencies are 0, 1, ...
+  std.length KDs M, std.iota M Is, std.map Is (i\ d\ std.lookup! KDs {calc (int_to_string i)} d) Ids,
+  std.map Ids (sort_of As) Ns, std.map Ns rank Rs, std.fold Rs 0 std.max R,
+  K is 2 * R + 1, chain K Ids Eqs.
+
+pred sort_of i:list art, i:string, o:string.
+sort_of As I N :- std.mem As (art I N _ _).
+
+pred chain i:int, i:list string, o:list (pair int elem).
+chain K [A, B|Ids] [pr K (elem.eq A B)|Eqs] :- chain K [B|Ids] Eqs.
+chain _ [_] [].
+
+% -- Rocq scripts, as the workbench records them
+% Tokens: identifiers, and the punctuation below, which comes apart
+pred tokens i:string, o:list string.
+tokens S Ts :-
+  rex.replace "\\(->\\|[(){},:;=.@]\\|Σ\\)" " \\1 " S S1, rex.split "[ \t\n\r]+" S1 Ts.
+
+pred punct i:string.
+punct T :- std.mem! ["(", ")", "{", "}", ",", ":", ";", "=", ".", "@", "->", "Σ"] T.
+pred id i:string.
+id T :- not (punct T).
+pred word i:string.                         % an identifier that is not a keyword
+word T :- id T, not (std.mem! ["forall", "ltac", "True"] T).
+
+% Statements, read as names, whose types are sorts applied to names or
+% equations between names
+kind rfm, rty type.
+type r.q quant -> string -> rty -> rfm -> rfm.
+type r.imp rfm -> rfm -> rfm.
+type r.tt rfm.
+type r.s string -> list string -> rty.
+type r.eq string -> string -> rty.
+
+pred parse.script o:string, o:rfm, o:list tac, i:list string, o:list string.
+parse.script R F T ["Lemma", R, ":"|S] S' :- parse.neg F S ["."|S1], parse.body T S1 ["Qed", "."|S'].
+
+pred parse.neg o:rfm, i:list string, o:list string.
+parse.neg F ["forall"|S] S' :- parse.binders Bs S [","|S1], parse.neg G S1 S', wrap q.all Bs G F.
+parse.neg F ["ltac", ":", "(", "subst_all_in", "("|S] S' :- parse.neg F S [")", ")"|S'].
+parse.neg F ["("|S] S' :- parse.neg A S [")"|S1], parse.arrow A S1 F S'.
+parse.neg F S S' :- parse.pos F S S'.
+
+pred parse.arrow i:rfm, i:list string, o:rfm, o:list string.
+parse.arrow A ["->"|S] (r.imp A B) S' :- parse.neg B S S'.
+parse.arrow A S A S :- not (S = ["->"|_]).
+
+pred parse.pos o:rfm, i:list string, o:list string.
+parse.pos F ["Σ"|S] S' :- parse.binders Bs S [","|S1], parse.pos G S1 S', wrap q.ex Bs G F.
+parse.pos F ["ltac", ":", "(", "subst_all_in", "("|S] S' :- parse.pos F S [")", ")"|S'].
+parse.pos r.tt ["True"|S] S.
+parse.pos (r.q q.ex "_" T r.tt) S S' :- parse.ty T S S'.
+
+pred parse.ty o:rty, i:list string, o:list string.
+parse.ty (r.eq A B) [A, "=", B|S] S :- id A, id B.
+parse.ty (r.s N As) [N|S] S' :- word N, parse.ids As S S', not (S' = ["="|_]).
+
+pred parse.ids o:list string, i:list string, o:list string. % as many as there are
+parse.ids [I|Is] [I|S] S' :- id I, parse.ids Is S S'.
+parse.ids [] [] [].
+parse.ids [] [T|S] [T|S] :- punct T.
+
+pred parse.binders o:list (pair string rty), i:list string, o:list string.
+parse.binders Bs ["("|S] S' :-
+  parse.ids [N|Ns] S [":"|S1], parse.ty T S1 [")"|S2], std.map [N|Ns] (n\ b\ b = pr n T) B1,
+  parse.binders B2 S2 S', std.append B1 B2 Bs.
+parse.binders [] S S :- not (S = ["("|_]).
+
+pred wrap i:quant, i:list (pair string rty), i:rfm, o:rfm.
+wrap _ [] F F.
+wrap Q [pr N T|Bs] G (r.q Q N T F) :- wrap Q Bs G F.
+
+% Tactics. A proof is a list of them that ends with exact; intros_sigma
+% (which introduces the universal binders of the goal) is implicit
+kind tac type.
+type tac.premise string -> rfm -> list tac -> tac.            % assert (H : F). { ... }
+type tac.set string -> string -> tac.                         % set (X := Y : T).
+type tac.rename string -> string -> tac.                      % rename X into Y.
+type tac.use string -> list string -> list string -> tac.     % a rule, its arguments, the names of its conclusion
+type tac.exact list string -> tac.                            % the witnesses of the goal
+
+pred parse.body o:list tac, i:list string, o:list string.
+parse.body Ts ["intros_sigma", "(", ")", "."|S] S' :- parse.body Ts S S'.
+parse.body [tac.exact Ws] ["exact"|S] S' :- parse.exact Ws S ["."|S'].
+parse.body [T|Ts] S S' :- parse.tac T S S1, parse.body Ts S1 S'.
+
+pred parse.tac o:tac, i:list string, o:list string.
+parse.tac (tac.premise H F T) ["assert", "(", H, ":"|S] S' :-
+  parse.neg F S [")", ".", "{"|S1], parse.body T S1 ["}"|S'].
+parse.tac (tac.set X Y) ["set", "(", X, ":", "=", Y, ":"|S] S' :- parse.ty _ S [")", "."|S'].
+parse.tac (tac.rename X Y) ["rename", X, "into", Y, "."|S] S.
+parse.tac (tac.use R As Ns) ["destruct_sigma", "(", "@", R|S] S' :-
+  parse.ids As S [")", "as"|S1], parse.ids Ns S1 ["."|S'].
+parse.tac (tac.use R As Ns) ["assert", "(", X, ":", "=", "@", R|S] S' :-
+  parse.ids As S [")", ";", "destruct_sigma", X, "as"|S1], parse.ids Ns S1 ["."|S'].
+parse.tac (tac.use R As []) ["assert", "(", _, ":", "=", "@", R|S] S' :- parse.ids As S [")", "."|S'].
+
+pred parse.exact o:list string, i:list string, o:list string.
+parse.exact Ws ["("|S] S' :- parse.tuple Ws S [")"|S'].
+parse.exact [W] [W|S] S :- id W.
+
+pred parse.tuple o:list string, i:list string, o:list string.
+parse.tuple [W|Ws] [W, ","|S] S' :- id W, parse.tuple Ws S S'.
+parse.tuple [W] [W|S] S :- id W, not (S = [","|_]).
+
+% -- elaboration: names are bound, innermost first
+pred elab i:env, i:rfm, o:fm.
+elab E (r.q Q N T F) G :-
+  elab_ty E T T1, quant Q T1 F1 G, pi x\ sigma E1\ name_bind N T x E E1, elab E1 F (F1 x).
+elab E (r.imp A B) (imp A1 B1) :- elab E A A1, elab E B B1.
+elab _ r.tt tt.
+
+pred elab_ty i:env, i:rty, o:ty.
+elab_ty E (r.s N Ns) (s N Xs) :- std.map Ns (n\ x\ std.lookup! E n x) Xs.
+elab_ty E (r.eq A B) (eq X Y) :- std.lookup! E A X, std.lookup! E B Y.
+
+pred name_bind i:string, i:rty, i:tm, i:env, o:env. % an equation is substituted away
+name_bind N (r.s _ _) X E [pr N X|E].
+name_bind _ (r.eq _ _) _ E E.
+
+pred binders_of i:rfm, o:list string.        % what intros_sigma introduces
+binders_of (r.q q.all N (r.s _ _) F) [N|Ns] :- binders_of F Ns.
+binders_of (r.q q.all _ (r.eq _ _) F) ["_"|Ns] :- binders_of F Ns.
+binders_of (r.q q.ex _ _ _) [].
+binders_of (r.imp _ _) [].
+binders_of r.tt [].
+
+pred proof i:rfm, i:list tac, o:pf.
+proof F T P :- binders_of F Ns, intros Ns [] (e\ body e [] T) P.
+
+pred intros i:list string, i:env, i:(pred i:env, o:pf), o:pf.
+intros [] E K P :- K E P.
+intros [N|Ns] E K (intro P) :- pi x\ intros Ns [pr N x|E] K (P x).
+
+pred unpacks i:list string, i:env, i:(pred i:env, o:pf), o:pf.
+unpacks [] E K P :- K E P.
+unpacks [N|Ns] E K (unpack P) :- pi x\ unpacks Ns [pr N x|E] K (P x).
+
+% [body E H T P] P is the proof T, with the names E of terms and H of premises.
+% The arguments of a rule are terms (eq_refl is refl) and premises
+pred body i:env, i:list (pair string pf), i:list tac, o:pf.
+body E H [tac.premise N F T|Ts] P :-
+  binders_of F Ns, intros Ns E (e\ body e H T) Q, body E [pr N Q|H] Ts P.
+body E H [tac.set X Y|Ts] P :- std.lookup! E Y V, body [pr X V|E] H Ts P.
+body E H [tac.rename X Y|Ts] P :- std.lookup! E X V, body [pr Y V|E] H Ts P.
+body E H [tac.use R As Ns|Ts] (apply (named R) Xs Qs P) :-
+  std.map As (argument E H) Args, arguments Args Xs Qs, unpacks Ns E (e\ body e H Ts) P.
+body _ _ [tac.exact ["I"]] (done []).
+body E _ [tac.exact Ws] (done Xs) :- not (Ws = ["I"]), std.map Ws (term_of E) Xs.
+
+kind rule_arg type.
+type a.tm tm -> rule_arg.
+type a.pf pf -> rule_arg.
+
+pred argument i:env, i:list (pair string pf), i:string, o:rule_arg.
+argument _ H N (a.pf Q) :- std.lookup! H N Q.
+argument E H N (a.tm X) :- not (std.lookup! H N _), term_of E N X.
+
+pred arguments i:list rule_arg, o:list tm, o:list pf.
+arguments [] [] [].
+arguments [a.tm X|As] [X|Xs] Qs :- arguments As Xs Qs.
+arguments [a.pf Q|As] Xs [Q|Qs] :- arguments As Xs Qs.
+
+pred term_of i:env, i:string, o:tm.
+term_of _ "eq_refl" refl.
+term_of E N X :- not (N = "eq_refl"), std.lookup! E N X.
