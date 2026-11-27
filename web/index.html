@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proof checker for coreact-workbench</title>
+<style>
+  :root { color-scheme: light dark; --ok: #1a7f37; --bad: #c62828; --muted: #6b6b6b; }
+  @media (prefers-color-scheme: dark) { :root { --ok: #3fb950; --bad: #ff7b72; --muted: #9a9a9a; } }
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; }
+  main { max-width: 44rem; margin: 2.5rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.6rem; line-height: 1.2; }
+  .muted { color: var(--muted); }
+  #drop { border: 2px dashed var(--muted); border-radius: .6rem; padding: 1.25rem; text-align: center; margin: 1.5rem 0 1rem; }
+  #drop.over { border-color: var(--ok); }
+  #drop p { margin: .5rem 0; }
+  button, input[type=file] { font: inherit; }
+  fieldset { border: none; padding: 0; margin: 0 0 1rem; }
+  legend { padding: 0; margin-bottom: .25rem; }
+  label { margin-right: 1.25rem; }
+  #result { font-weight: 600; }
+  #result.ok { color: var(--ok); }
+  #result.bad { color: var(--bad); }
+  pre { background: color-mix(in srgb, currentColor 7%, transparent); padding: .75rem 1rem; border-radius: .4rem;
+        white-space: pre-wrap; overflow-wrap: anywhere; }
+  pre:empty { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Proof checker for coreact-workbench</h1>
+  <p>This page checks the proofs recorded in an archive of
+  <a href="https://github.com/amblafont/coreact-workbench">coreact-workbench</a>
+  (the <code>.hrx</code> file that its <em>Save</em> button writes) with a small
+  proof checker written in <a href="https://github.com/LPCIC/elpi">Elpi</a>.
+  It all runs in your browser: the archive is not sent anywhere.</p>
+
+  <div id="drop">
+    <p>Drop an archive here, or choose one:</p>
+    <p><input type="file" id="file" accept=".hrx" disabled></p>
+    <p>or <button id="sample" disabled>check the example</button>
+      <span class="muted">(results of <a href="http://katmat.math.uni-bremen.de/acc/">The Joy of Cats</a>)</span></p>
+  </div>
+
+  <fieldset>
+    <legend>Check with</legend>
+    <label><input type="checkbox" name="backend" value="cut" checked> cut <span class="muted">(equalities by union-find)</span></label>
+    <label><input type="checkbox" name="backend" value="part" checked> part <span class="muted">(equalities by partitions)</span></label>
+  </fieldset>
+
+  <p id="status" class="muted" role="status">Loading Elpi…</p>
+  <p id="result" aria-live="polite"></p>
+  <pre id="output"></pre>
+
+  <p class="muted">Source: <a href="https://github.com/manmatteo/coreact-checker">manmatteo/coreact-checker</a></p>
+</main>
+<script src="elpi-api.js"></script>
+<script>
+  "use strict";
+  // ?backend=wasm or js picks the build of Elpi, ?sample checks the example
+  const params = new URLSearchParams(location.search);
+  const $ = (id) => document.getElementById(id);
+  let check = null;    // the checker, once Elpi is loaded
+  let engine = "";     // which build of Elpi it runs on
+  let archive = null;  // { name, text }: the last archive given
+
+  // an Elpi string: only \ and " need escaping
+  const elpiString = (s) => '"' + s.replace(/[\\"]/g, (c) => "\\" + c) + '"';
+
+  // Compiles elpi/from_json.elpi with Elpi's API (elpi-api.js), where files
+  // maps the paths of the files it accumulates (/elpi/*.elpi,
+  // /packages/elpi-json/*) to their texts. Gives check(name, text, backends)
+  // = { ok, output, message }: whether the archive checks with the backends,
+  // what the checker printed, and why it does not
+  function checker({ Setup, Parse, Compile, Execute }, files) {
+    let output = "";
+    Setup.setStdFormatter((s) => (output += s));
+    Setup.setErrFormatter((s) => (output += s));
+    const elpi = Setup.init({
+      // accumulate checker, in /elpi/from_json.elpi: /elpi/checker.elpi
+      fileResolver: (unit, cwd) => {
+        const path = unit.startsWith("/") ? unit : `${cwd}/${unit}`;
+        return path.endsWith(".elpi") ? path : `${path}.elpi`;
+      },
+      fileReader: (path) => {
+        if (path in files) return files[path];
+        throw new Error(`${path}: no such file`);
+      },
+    });
+    const source = "/elpi/from_json.elpi";
+    const { program } = Compile.program(elpi, Parse.programFrom(elpi, files[source], { source }).program);
+    return (name, text, backends) => {
+      output = "";
+      try {
+        const goal = Parse.query(elpi,
+          `check_text ${elpiString(name)} ${elpiString(text)} [${backends.map(elpiString).join(", ")}]`);
+        if (goal.error) throw new Error(goal.error.text);
+        const query = Compile.query(program, goal.query);
+        if (query.error) throw new Error(query.error.text);
+        const { outcome } = Execute.once(Compile.optimize(query.query));
+        const ok = outcome === "success";
+        return { ok, output, message: ok ? "" : `the check ended with ${outcome}` };
+      } catch (e) {
+        return { ok: false, output, message: e.message };
+      }
+    };
+  }
+
+  async function start() {
+    try {
+      const [api, files] = await Promise.all([
+        elpiApi.load(params.has("backend") ? { backend: params.get("backend") } : {}),
+        fetch("files.json").then((r) => r.json()),
+      ]);
+      check = checker(api, files);
+      engine = `Elpi in ${api.backend === "wasm" ? "WebAssembly" : "JavaScript"}`;
+      $("status").textContent = `Ready (${engine}).`;
+      $("file").disabled = $("sample").disabled = false;
+      if (params.has("sample")) sample();
+    } catch (e) {
+      $("status").textContent = `Elpi could not start: ${e.message}`;
+    }
+  }
+
+  function show(ok, text, output) {
+    $("result").className = ok ? "ok" : "bad";
+    $("result").textContent = text;
+    $("output").textContent = output.trim();
+  }
+
+  async function run() {
+    if (!check || !archive) return;
+    const backends = [...document.querySelectorAll("input[name=backend]:checked")].map((b) => b.value);
+    if (backends.length === 0) {
+      $("status").textContent = `Ready (${engine}).`;
+      return show(false, "Choose at least one way to check.", "");
+    }
+    show(true, "", "");
+    $("status").textContent = `Checking ${archive.name}…`;
+    await new Promise((r) => setTimeout(r, 30)); // let the page show it
+    const start = performance.now();
+    const r = check(archive.name, archive.text, backends);
+    $("status").textContent = `Checked in ${((performance.now() - start) / 1000).toFixed(2)} s (${engine}).`;
+    show(r.ok, r.ok ? `✓ ${archive.name}: all its proofs check.` : `✗ ${r.message}`, r.output);
+  }
+
+  async function use(file) {
+    show(true, "", "");
+    $("status").textContent = `Reading ${file.name}…`;
+    archive = { name: file.name, text: await file.text() };
+    run();
+  }
+  async function sample() { archive = { name: "joy_of_cats.hrx", text: await (await fetch("joy_of_cats.hrx")).text() }; run(); }
+
+  $("file").addEventListener("change", (e) => e.target.files[0] && use(e.target.files[0]));
+  $("sample").addEventListener("click", sample);
+  for (const b of document.querySelectorAll("input[name=backend]")) b.addEventListener("change", run);
+  const drop = $("drop");
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+    if (check && e.dataTransfer.files[0]) use(e.dataTransfer.files[0]);
+  });
+  start();
+</script>
+</body>
+</html>
